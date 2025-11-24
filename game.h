@@ -382,7 +382,7 @@ class Game
 		void parsePlayerExtendedOpcode(uint32_t playerId, uint8_t opcode, const std::string& buffer);
                 bool playerUpdateAutoLoot(uint32_t playerId, uint16_t clientId, const std::string& name, bool remove);
 // Tasks
-		void playerManageTasks(uint32_t playerId, uint8_t id, const std::string& taskName);
+		void playerManageTasks(uint32_t playerId, uint8_t id, const std::string& taskName, uint8_t taskId);
 		int32_t getGlobalStorageValue(int32_t key);
 		static void updatePremium(Account& account);
 

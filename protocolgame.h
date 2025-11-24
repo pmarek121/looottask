@@ -145,7 +145,8 @@ class ProtocolGame final : public Protocol
 		void parseOpenChannel(NetworkMessage& msg);
 		void parseOpenPrivateChannel(NetworkMessage& msg);
 		void parseCloseChannel(NetworkMessage& msg);
-                 // Tasks
+        
+		// Tasks
 		void parseTasks(NetworkMessage& msg);
 		void sendTasks();
 

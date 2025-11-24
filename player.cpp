@@ -865,17 +865,6 @@ if (storageCache.find(key) == storageCache.end()) {
 	}
 }
 
-bool Player::canUpdateTask(uint32_t key)
-{
-	auto itStorage = storageCache.find(key);
-	if (itStorage == storageCache.end()) {
-		return false;
-	}
-
-	storageCache.erase(itStorage);
-	return true;
-}
-
 bool Player::getStorageValue(const uint32_t key, int32_t& value) const
 {
 	auto it = storageMap.find(key);
@@ -3392,12 +3381,11 @@ void Player::onAttackedCreature(Creature* target)
     }
 
     // Jeden raz pobieramy targetPlayer
-    Player* targetPlayer = target->getPlayer();
-    if (!targetPlayer) {
-        // fragment z commita – brak playera, zaktualizuj task i wyjdŸ
-        updateTask(target->getName(), true);
-        return;
-    }
+	Player* targetPlayer = target ? target->getPlayer() : nullptr;
+	if (!targetPlayer) {
+		updateTask(target->getName(), true, false);
+		return false;
+	}
 
     // Dalej Twój stary kod:
     if (!isPartner(targetPlayer)) {

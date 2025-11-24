@@ -628,7 +628,7 @@ class Player final : public Creature, public Cylinder
 		size_t getMaxVIPEntries() const;
 		size_t getMaxDepotItems() const;
 
-// Tasks
+		// Tasks
 		uint32_t getTaskKills(const std::string& taskName, const std::string& monsterName) {
 			return m_tasks->getTaskKills(taskName, monsterName);
 		}
@@ -639,24 +639,21 @@ class Player final : public Creature, public Cylinder
 		bool isActive() const { return m_tasks->isActive(); }
 
 		const TasksList getTasks() const { return m_tasks->getTasks(this); }
-		std::unordered_map<std::string, double> getAttributes() const { return m_tasks->getAttributes(); }
 		const CompletedTasks& getCompletedTasks() const { return m_tasks->getCompletedTasks(); }
-		bool canUpdateTask(uint32_t key);
 
-		ReturnTaskMessages manageTask(uint8_t id, const std::string& taskName) { return m_tasks->manageTask(this, id, taskName); }
+		ReturnTaskMessages_t manageTask(uint8_t id, const std::string& taskName, uint8_t taskId) { return m_tasks->manageTask(this, id, taskName, taskId); }
 
-		void addTask(const std::string& taskName, const std::string& monsterName, uint32_t kills, uint64_t cooldown) {
-			m_tasks->addTask(taskName, monsterName, kills, cooldown);
+		void addTask(const std::string& taskName, const std::string& monsterName, uint8_t taskId, double kills, uint64_t cooldown) {
+			m_tasks->addTask(taskName, monsterName, taskId, kills, cooldown);
 		}
 		void disableTasks() { m_tasks->disable(); }
 		void addCompletedTask(const std::string& taskName, uint16_t count) { m_tasks->addCompletedTask(taskName, count); }
-		void updateTask(const std::string& monsterName, bool lastHit) { m_tasks->updateTask(this, monsterName, lastHit); }
+		void updateTask(const std::string& monsterName, bool lastHit, bool halfEntry) { m_tasks->updateTask(this, monsterName, lastHit, halfEntry); }
 		void sendTasks() {
 			if (client) {
 				client->sendTasks();
 			}
 		}
-
 
 		//tile
 		//send methods

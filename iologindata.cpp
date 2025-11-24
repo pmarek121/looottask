@@ -272,7 +272,7 @@ bool IOLoginData::loadPlayer(Player* player, DBResult_ptr result)
 		condition = Condition::createCondition(propStream);
 	}
 
-// Unserialize tasks
+	// Unserialize tasks
 	unsigned long tasksSize;
 	const char* tasks = result->getStream("tasks", tasksSize);
 	PropStream propStreamTasks;
@@ -287,16 +287,29 @@ bool IOLoginData::loadPlayer(Player* player, DBResult_ptr result)
 		std::string taskName;
 		propStreamTasks.readString(taskName);
 
-		uint32_t monsters = 0;
-		propStreamTasks.read<uint32_t>(monsters);
-		for (size_t j = 0; j < monsters; ++j) {
+		uint8_t taskId = 0;
+		propStreamTasks.read<uint8_t>(taskId);
+
+		if (taskId == 0) {
+			uint32_t monsters = 0;
+			propStreamTasks.read<uint32_t>(monsters);
+			for (size_t j = 0; j < monsters; ++j) {
+				std::string monsterName;
+				propStreamTasks.readString(monsterName);
+
+				uint32_t kills = 0;
+				propStreamTasks.read<uint32_t>(kills);
+
+				player->addTask(taskName, monsterName, taskId, kills / 10., cooldown);
+			}
+		} else {
 			std::string monsterName;
 			propStreamTasks.readString(monsterName);
 
 			uint32_t kills = 0;
 			propStreamTasks.read<uint32_t>(kills);
 
-			player->addTask(taskName, monsterName, kills, cooldown);
+			player->addTask(taskName, monsterName, taskId, kills / 10., cooldown);
 		}
 	}
 
@@ -672,29 +685,30 @@ bool IOLoginData::savePlayer(Player* player)
 	size_t conditionsSize;
 	const char* conditions = propWriteStream.getStream(conditionsSize);
 
-//serialize loot list
-	PropWriteStream propWriteStreamLootList;
-	propWriteStreamLootList.write<uint16_t>(player->autoLootItems.size());
-	for (auto& itItem : player->autoLootItems)
-	{
-		propWriteStreamLootList.write<uint16_t>(itItem);
-	}
-
-	propWriteStreamLootList.write<uint16_t>(0);
-	size_t autolootSize;
-	const char* autoloot = propWriteStreamLootList.getStream(autolootSize);
-
-const TasksList& playerTasks = player->getTasks();
+	// serialize tasks
+	const TasksList& playerTasks = player->getTasks();
 	PropWriteStream propWriteTasksStream;
 
 	propWriteTasksStream.write<uint8_t>(playerTasks.size());
 	for (auto& [taskName, taskData] : playerTasks) {
 		propWriteTasksStream.write<uint64_t>(taskData.currentCooldown);
 		propWriteTasksStream.writeString(taskName);
-		propWriteTasksStream.write<uint32_t>(taskData.monsters.size());
-		for (auto& taskProgress : taskData.monsters) {
-			propWriteTasksStream.writeString(taskProgress.names.begin()->first);
-			propWriteTasksStream.write<uint32_t>(taskProgress.kills);
+		propWriteTasksStream.write<uint8_t>(taskData.taskId);
+
+		if (taskData.taskId == 0) {
+			propWriteTasksStream.write<uint32_t>(taskData.monsters.size());
+			for (auto& taskProgress : taskData.monsters) {
+				propWriteTasksStream.writeString(taskProgress.names.begin()->first);
+				propWriteTasksStream.write<uint32_t>(taskProgress.kills * 10);
+			}
+		} else {
+			for (auto& taskProgress : taskData.monsters) {
+				if (taskProgress.id == taskData.taskId) {
+					propWriteTasksStream.writeString(taskProgress.names.begin()->first);
+					propWriteTasksStream.write<uint32_t>(taskProgress.kills * 10);
+					break;
+				}
+			}
 		}
 	}
 
@@ -707,6 +721,18 @@ const TasksList& playerTasks = player->getTasks();
 
 	size_t tasksSize;
 	const char* tasks = propWriteTasksStream.getStream(tasksSize);
+
+	//serialize loot list
+	PropWriteStream propWriteStreamLootList;
+	propWriteStreamLootList.write<uint16_t>(player->autoLootItems.size());
+	for (auto& itItem : player->autoLootItems)
+	{
+		propWriteStreamLootList.write<uint16_t>(itItem);
+	}
+
+	propWriteStreamLootList.write<uint16_t>(0);
+	size_t autolootSize;
+	const char* autoloot = propWriteStreamLootList.getStream(autolootSize);
 
 	//First, an UPDATE query to write the player itself
 	query.str(std::string());
@@ -747,8 +773,8 @@ const TasksList& playerTasks = player->getTasks();
 	}
 
 	query << "`conditions` = " << db->escapeBlob(conditions, conditionsSize) << ',';
-        query << "`autoloot` = " << db->escapeBlob(autoloot, autolootSize) << ',';
-        query << "`tasks` = " << db->escapeBlob(tasks, tasksSize) << ',';
+	query << "`autoloot` = " << db->escapeBlob(autoloot, autolootSize) << ',';
+	query << "`tasks` = " << db->escapeBlob(tasks, tasksSize) << ',';
 
 	if (g_game.getWorldType() != WORLD_TYPE_PVP_ENFORCED) {
 		int32_t skullTime = 0;
