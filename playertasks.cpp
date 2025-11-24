@@ -8,18 +8,6 @@
 // NOTE! SQL query has to be executed
 // ALTER TABLE `players` ADD `tasks` BLOB NULL DEFAULT NULL AFTER `conditions`;
 
-//	[1] = {
-//		className = "TROLLS",
-//		monsters = { "Troll", "Island Troll", "Swamp Troll", "Frost Troll" },
-//		bossName = "Big Boss Trolliver",
-//		experience = 6000,
-//		count = 200,
-//		storageId = 5001,
-//		bonusStorageId = 5001,
-//		classOutfit = { type = 15 },
-//		rewards = { 2148, 4, 2152, 4, 2160, 1 }
-//	},
-
 extern Monsters g_monsters;
 extern Game g_game;
 
@@ -38,8 +26,42 @@ bool getTaskValue(lua_State* L, const char* node, T& value, bool ignore = false)
 	return true;
 };
 
-bool PlayerTasksData::load()
-{
+bool getRewards(lua_State* L, TaskRewards& rewards) {
+	lua_getfield(L, -1, "rewards");
+	if (lua_istable(L, -1)) {
+		lua_pushnil(L);
+		while (lua_next(L, -2)) {
+			lua_getfield(L, -1, "itemId");
+			if (!lua_isnumber(L, -1)) {
+				std::cout << "[Warning - PlayerTasksData::load] Missing rewards 'itemId' property." << std::endl;
+				return false;
+			}
+
+			uint16_t itemId = lua_tonumber(L, -1);
+			lua_pop(L, 1);
+
+			lua_getfield(L, -1, "count");
+			if (!lua_isnumber(L, -1)) {
+				std::cout << "[Warning - PlayerTasksData::load] Missing rewards 'count' property." << std::endl;
+				return false;
+			}
+
+			const ItemType& it = Item::items[itemId];
+			if (it.id == 0) {
+				std::cout << "[Warning - PlayerTasksData::load] Invalid item ID '" << itemId << "'." << std::endl;
+				return false;
+			}
+
+			rewards.push_back({ itemId, it.clientId, lua_tonumber(L, -1) });
+			lua_pop(L, 2);
+		}
+	}
+
+	lua_pop(L, 1);
+	return true;
+}
+
+bool PlayerTasksData::load() {
 	lua_State* L = luaL_newstate();
 	if (!L) {
 		throw std::runtime_error("Failed to allocate memory in PlayerTasksData");
@@ -74,7 +96,7 @@ bool PlayerTasksData::load()
 		m_globalTaskBonusGlobalStorgeId = lua_tonumber(L, -1);
 	}
 	lua_pop(L, 1);
-	
+
 	lua_getglobal(L, "TASK_COUNT_FOR_MOST_DAMAGE");
 	if (lua_isboolean(L, -1)) {
 		m_taskCountForMostDamage = lua_toboolean(L, -1);
@@ -105,10 +127,9 @@ bool PlayerTasksData::load()
 		lua_pop(L, 1);
 
 		if (!getTaskValue(L, "cooldown", taskData.cooldown) ||
-			!getTaskValue(L, "experience", taskData.experience) ||
+			!getTaskValue(L, "experience", taskData.experience, true) ||
 			!getTaskValue(L, "maxRepeatQuantity", taskData.maxRepeatQuantity) ||
-			!getTaskValue(L, "storageId", taskData.storageId) ||
-			!getTaskValue(L, "bonusStorageId", taskData.bonusStorageId, true)) {
+			!getTaskValue(L, "storageId", taskData.storageId)) {
 			return false;
 		}
 
@@ -120,23 +141,29 @@ bool PlayerTasksData::load()
 
 		{
 			lua_getfield(L, -1, "type");
-taskData.classOutfit.lookType = lua_tonumber(L, -1);
-lua_pop(L, 1);
-lua_getfield(L, -1, "head");
-taskData.classOutfit.lookHead = lua_tonumber(L, -1);
-lua_pop(L, 1);
-lua_getfield(L, -1, "body");
-taskData.classOutfit.lookBody = lua_tonumber(L, -1);
-lua_pop(L, 1);
-lua_getfield(L, -1, "legs");
-taskData.classOutfit.lookLegs = lua_tonumber(L, -1);
-lua_pop(L, 1);
-lua_getfield(L, -1, "feet");
-taskData.classOutfit.lookFeet = lua_tonumber(L, -1);
-lua_pop(L, 1);
-lua_getfield(L, -1, "addons");
-taskData.classOutfit.lookAddons = lua_tonumber(L, -1);
-lua_pop(L, 1);		}
+			taskData.classOutfit.lookType = lua_tonumber(L, -1);
+			lua_pop(L, 1);
+
+			lua_getfield(L, -1, "head");
+			taskData.classOutfit.lookHead = lua_tonumber(L, -1);
+			lua_pop(L, 1);
+
+			lua_getfield(L, -1, "body");
+			taskData.classOutfit.lookBody = lua_tonumber(L, -1);
+			lua_pop(L, 1);
+
+			lua_getfield(L, -1, "legs");
+			taskData.classOutfit.lookLegs = lua_tonumber(L, -1);
+			lua_pop(L, 1);
+
+			lua_getfield(L, -1, "feet");
+			taskData.classOutfit.lookFeet = lua_tonumber(L, -1);
+			lua_pop(L, 1);
+
+			lua_getfield(L, -1, "addons");
+			taskData.classOutfit.lookAddons = lua_tonumber(L, -1);
+			lua_pop(L, 1);
+		}
 		lua_pop(L, 1);
 
 		lua_getfield(L, -1, "monsters");
@@ -146,7 +173,10 @@ lua_pop(L, 1);		}
 		}
 
 		{
+			taskData.type = TASKTYPE_MULTITASK;
+
 			lua_pushnil(L);
+			uint8_t counter = 0;
 			while (lua_next(L, -2)) {
 				lua_getfield(L, -1, "name");
 
@@ -163,6 +193,9 @@ lua_pop(L, 1);		}
 					}
 
 					names.emplace_back(name, mType->outfit);
+					if (taskData.type == TASKTYPE_MULTITASK && asLowerCaseString(name) != asLowerCaseString(taskData.className)) {
+						taskData.type = TASKTYPE_SINGLETASK;
+					}
 				} else if (lua_istable(L, -1)) {
 					// name = {"Demon", "Juggernaut", "Hero"}
 					lua_pushnil(L);
@@ -176,6 +209,9 @@ lua_pop(L, 1);		}
 						}
 
 						names.emplace_back(name, mType->outfit);
+						if (taskData.type == TASKTYPE_MULTITASK && asLowerCaseString(name) != asLowerCaseString(taskData.className)) {
+							taskData.type = TASKTYPE_SINGLETASK;
+						}
 						lua_pop(L, 1);
 					}
 
@@ -194,91 +230,37 @@ lua_pop(L, 1);		}
 				TaskProgress taskProgress;
 				taskProgress.count = lua_tonumber(L, -1);
 				taskProgress.names = names;
+				taskProgress.id = ++counter;
+
 				lua_pop(L, 1);
+				if (!getRewards(L, taskProgress.rewards) || !getTaskValue(L, "experience", taskProgress.experience, true)) {
+					return false;
+				}
 
 				taskData.monsters.push_back(taskProgress);
 				lua_pop(L, 1);
 			}
 		}
-		lua_pop(L, 1);
 
-		lua_getfield(L, -1, "rewards");
-		if (!lua_istable(L, -1)) {
-			std::cout << "[Warning - PlayerTasksData::load] Missing rewards property." << std::endl;
+		lua_pop(L, 1);
+		if (!getRewards(L, taskData.rewards)) {
 			return false;
 		}
 
-		{
-			lua_pushnil(L);
-			while (lua_next(L, -2)) {
-				lua_getfield(L, -1, "itemId");
-				if (!lua_isnumber(L, -1)) {
-					std::cout << "[Warning - PlayerTasksData::load] Missing rewards 'itemId' property." << std::endl;
-					return false;
-				}
-
-				uint16_t itemId = lua_tonumber(L, -1);
-				lua_pop(L, 1);
-
-				lua_getfield(L, -1, "count");
-				if (!lua_isnumber(L, -1)) {
-					std::cout << "[Warning - PlayerTasksData::load] Missing rewards 'count' property." << std::endl;
-					return false;
-				}
-
-				const ItemType& it = Item::items[itemId];
-				if (it.id == 0) {
-					std::cout << "[Warning - PlayerTasksData::load] Invalid item ID '" << itemId << "'." << std::endl;
-					return false;
-				}
-
-				taskData.rewards.push_back({ itemId, it.clientId, lua_tonumber(L, -1) });
-				lua_pop(L, 2);
-			}
-		}
-
-		lua_pop(L, 1);
-
-		lua_getfield(L, -1, "attributes");
-		if (lua_istable(L, -1)) {
-			lua_pushnil(L);
-			while (lua_next(L, -2)) {
-				lua_getfield(L, -1, "name");
-				if (!lua_isstring(L, -1)) {
-					std::cout << "[Warning - PlayerTasksData::load] Missing attributes 'name' property." << std::endl;
-					return false;
-				}
-
-				std::string name = lua_tostring(L, -1);
-				lua_pop(L, 1);
-
-				lua_getfield(L, -1, "value");
-				if (!lua_isnumber(L, -1)) {
-					std::cout << "[Warning - PlayerTasksData::load] Missing attributes 'value' property." << std::endl;
-					return false;
-				}
-
-				taskData.attributes.push_back({ name, static_cast<double>(lua_tonumber(L, -1)) });
-				lua_pop(L, 2);
-			}
-		}
-
 		m_playerTasks.emplace_back(taskData.className, taskData);
-		lua_pop(L, 2);
+		lua_pop(L, 1);
 	}
 
 	lua_close(L);
 	return true;
 }
 
-bool PlayerTasksData::reload()
-{
+bool PlayerTasksData::reload() {
 	m_playerTasks.clear();
 	return load();
 }
 
-TaskData* PlayerTasksData::getTaskByName(const std::string& name)
-{
+TaskData* PlayerTasksData::getTaskByName(const std::string& name) {
 	for (auto& [taskName, taskData] : m_playerTasks) {
 		if (name == taskName) {
 			return &taskData;
@@ -289,8 +271,7 @@ TaskData* PlayerTasksData::getTaskByName(const std::string& name)
 	return nullptr;
 }
 
-const char* PlayerTasksData::getReturnMessage(ReturnTaskMessages ret) const
-{
+const char* PlayerTasksData::getReturnMessage(ReturnTaskMessages_t ret) const {
 	switch (ret) {
 		case RET_TASK_ALREADY_TAKEN:
 			return "Task is already taken.";
@@ -307,23 +288,25 @@ const char* PlayerTasksData::getReturnMessage(ReturnTaskMessages ret) const
 	}
 }
 
-uint16_t PlayerTasksData::getMaximumTaskAtOnce(Player* player)
-{
+uint16_t PlayerTasksData::getMaximumTaskAtOnce(Player* player) {
 	return player->isPremium() ? m_maximumPremiumTasksAtOnce : m_maximumTasksAtOnce;
 }
 
-void TaskData::updateTask(const Player* player, const std::string& name) {
+void TaskData::updateTask(const Player* player, const std::string& name, bool halfEntry) {
 	for (auto& taskProgress : this->monsters) {
+		if (taskId != 0 && taskProgress.id != taskId) {
+			continue;
+		}
+
 		if (taskProgress.kills >= taskProgress.count) {
 			continue;
 		}
 
-		if (taskProgress.canUse(name)) {
+		if (taskProgress.canUse(name, taskId)) {
 			const auto timeNow = (OTSYS_TIME() / 1000);
 			if (g_game.getGlobalStorageValue(PlayerTasksData::getInstance()->m_globalTaskBonusGlobalStorgeId) >= timeNow) {
 				taskProgress.kills++;
-			}
-			else {
+			} else {
 				int32_t storageId = PlayerTasksData::getInstance()->m_globalTaskBonusStorgeId;
 				if (storageId != 0) {
 					int32_t value = 0;
@@ -334,38 +317,31 @@ void TaskData::updateTask(const Player* player, const std::string& name) {
 			}
 
 			if (taskProgress.kills < taskProgress.count) {
-				taskProgress.kills++;
+				if (halfEntry) {
+					taskProgress.kills += 0.5;
+				} else {
+					taskProgress.kills++;
+				}
 			}
 			break;
 		}
 	}
 }
 
-bool TaskData::isBonusTask(const Player* player) const
-{
-	if (bonusStorageId == 0) {
-		return false;
-	}
-
-	int32_t value = 0;
-	if (player->getStorageValue(bonusStorageId, value)) {
-		return value == 1;
-	}
-	return false;
-}
-
-ReturnTaskMessages PlayerTasks::manageTask(Player* player, uint8_t id, const std::string& taskName)
-{
+ReturnTaskMessages_t PlayerTasks::manageTask(Player* player, uint8_t id, const std::string& taskName, uint8_t taskId) {
 	switch (id) {
-		case 1: {
+		case 1:
+		{
 			// Claim rewards
 			return completeTask(player, taskName);
 		}
-		case 2: {
+		case 2:
+		{
 			// Select task
-			return selectTask(player, taskName);
+			return selectTask(player, taskName, taskId);
 		}
-		case 3: {
+		case 3:
+		{
 			// Cancel task
 			return cancelTask(taskName);
 		}
@@ -376,8 +352,7 @@ ReturnTaskMessages PlayerTasks::manageTask(Player* player, uint8_t id, const std
 	return RET_TASK_NO_ERROR;
 }
 
-ReturnTaskMessages PlayerTasks::completeTask(Player* player, const std::string& taskName)
-{
+ReturnTaskMessages_t PlayerTasks::completeTask(Player* player, const std::string& taskName) {
 	if (!hasActiveTask(taskName)) {
 		return RET_TASK_IS_NOT_ACTIVE;
 	}
@@ -387,8 +362,23 @@ ReturnTaskMessages PlayerTasks::completeTask(Player* player, const std::string& 
 		return RET_TASK_IS_NOT_COMPLETED;
 	}
 
+	TaskRewards* rewards = &task->rewards;
+	uint64_t experience = task->experience;
+	if (task->taskId != 0) {
+		// Get the specific monster's rewards
+		for (auto& taskProgress : task->monsters) {
+			if (taskProgress.id != task->taskId) {
+				continue;
+			}
+
+			rewards = &taskProgress.rewards;
+			experience = taskProgress.experience;
+			break;
+		}
+	}
+
 	Item* mailItem = nullptr;
-	for (auto& [itemId, clientId, itemCount] : task->rewards) {
+	for (auto& [itemId, clientId, itemCount] : *rewards) {
 		uint16_t count = itemCount;
 		while (count > 0) {
 			if (!mailItem) {
@@ -401,32 +391,27 @@ ReturnTaskMessages PlayerTasks::completeTask(Player* player, const std::string& 
 		}
 	}
 
-	player->onGainExperience(task->experience, nullptr);
-	player->addStorageValue(task->storageId, 1);
+	player->onGainExperience(experience, nullptr);
+
+	int32_t value = 0;
+	player->getStorageValue(task->storageId, value);
+	player->addStorageValue(task->storageId, std::max(0, value) + 1);
 	if (mailItem) {
 		g_game.internalAddItem(player, mailItem, INDEX_WHEREEVER, FLAG_NOLIMIT);
 	}
 
-	auto itCompletedTask = m_completedTasks.find(taskName);
-	if (itCompletedTask == m_completedTasks.end()) {
-		m_completedTasks.emplace(taskName, 1);
-	}
-	else {
-		itCompletedTask->second++;
-	}
+	m_completedTasks[taskName]++;
 
 	if (task->cooldown > 0) {
 		task->currentCooldown = OTSYS_TIME() + (task->cooldown * 1000);
-	}
-	else {
+	} else {
 		removeTask(taskName);
 	}
 
 	return RET_TASK_NO_ERROR;
 }
 
-ReturnTaskMessages PlayerTasks::selectTask(Player* player, const std::string& taskName)
-{
+ReturnTaskMessages_t PlayerTasks::selectTask(Player* player, const std::string& taskName, uint8_t taskId) {
 	if (!canTakeTask(player, taskName)) {
 		return RET_TASK_LIMIT_HAS_BEEN_REACHED;
 	}
@@ -435,12 +420,11 @@ ReturnTaskMessages PlayerTasks::selectTask(Player* player, const std::string& ta
 		return RET_TASK_ALREADY_TAKEN;
 	}
 
-	addTask(PlayerTasksData::getInstance()->getTaskByName(taskName), "", 0, 0);
+	addTask(PlayerTasksData::getInstance()->getTaskByName(taskName), "", taskId, 0, 0);
 	return RET_TASK_NO_ERROR;
 }
 
-ReturnTaskMessages PlayerTasks::cancelTask(const std::string& taskName)
-{
+ReturnTaskMessages_t PlayerTasks::cancelTask(const std::string& taskName) {
 	if (!hasActiveTask(taskName)) {
 		return RET_TASK_IS_NOT_ACTIVE;
 	}
@@ -454,9 +438,8 @@ ReturnTaskMessages PlayerTasks::cancelTask(const std::string& taskName)
 	return RET_TASK_NO_ERROR;
 }
 
-void PlayerTasks::removeTask(const std::string& name)
-{
-	for(auto itTask = m_activeTasks.begin(); itTask != m_activeTasks.end(); ++itTask) {
+void PlayerTasks::removeTask(const std::string& name) {
+	for (auto itTask = m_activeTasks.begin(); itTask != m_activeTasks.end(); ++itTask) {
 		if (name == itTask->first) {
 			m_activeTasks.erase(itTask);
 			break;
@@ -464,26 +447,22 @@ void PlayerTasks::removeTask(const std::string& name)
 	}
 }
 
-void PlayerTasks::addTask(const TaskData* data, const std::string& monsterName, uint32_t kills, uint64_t cooldown)
-{
+void PlayerTasks::addTask(const TaskData* data, const std::string& monsterName, uint8_t taskId, double kills, uint64_t cooldown) {
 	if (monsterName.empty()) {
 		// Select the task
-		m_activeTasks.emplace_back(data->className, TaskData(data, kills, cooldown));
-	}
-	else {
+		m_activeTasks.emplace_back(data->className, TaskData(data, taskId, kills, cooldown));
+	} else {
 		// Load the task
 		TaskData* task = getTask(data->className);
 		if (!task) {
-			m_activeTasks.emplace_back(data->className, TaskData(data, monsterName, kills, cooldown));
-		}
-		else {
+			m_activeTasks.emplace_back(data->className, TaskData(data, taskId, monsterName, kills, cooldown));
+		} else {
 			task->updateTask(monsterName, kills);
 		}
 	}
 }
 
-uint32_t PlayerTasks::getTaskKills(const std::string& taskName, const std::string& monsterName)
-{
+uint32_t PlayerTasks::getTaskKills(const std::string& taskName, const std::string& monsterName) {
 	TaskData* task = getTask(taskName);
 	if (!task) {
 		return 0;
@@ -492,8 +471,7 @@ uint32_t PlayerTasks::getTaskKills(const std::string& taskName, const std::strin
 	return task->getTaskKills(monsterName);
 }
 
-uint64_t PlayerTasks::getCooldown(const std::string& taskName)
-{
+uint64_t PlayerTasks::getCooldown(const std::string& taskName) {
 	TaskData* task = getTask(taskName);
 	if (!task) {
 		return 0;
@@ -507,18 +485,20 @@ uint64_t PlayerTasks::getCooldown(const std::string& taskName)
 	return task->currentCooldown;
 }
 
-void PlayerTasks::addTask(const std::string& taskName, const std::string& monsterName, uint32_t kills, uint64_t cooldown)
-{
-	addTask(PlayerTasksData::getInstance()->getTaskByName(taskName), monsterName, kills, cooldown);
+void PlayerTasks::addTask(const std::string& taskName, const std::string& monsterName, uint8_t taskId, double kills, uint64_t cooldown) {
+	addTask(PlayerTasksData::getInstance()->getTaskByName(taskName), monsterName, taskId, kills, cooldown);
 }
 
-void PlayerTasks::addCompletedTask(const std::string& taskName, uint16_t count)
-{
+void PlayerTasks::addCompletedTask(const std::string& taskName, uint16_t count) {
+	TaskData* data = getTask(taskName);
+	if (data && data->maxRepeatQuantity > 0 && count >= data->maxRepeatQuantity) {
+		removeTask(taskName);
+	}
+
 	m_completedTasks.emplace(taskName, count);
 }
 
-void PlayerTasks::updateTask(Player* player, const std::string& monsterName, bool lastHit)
-{
+void PlayerTasks::updateTask(Player* player, const std::string& monsterName, bool lastHit, bool halfEntry) {
 	if (lastHit && !PlayerTasksData::getInstance()->m_taskCountForMostDamage) {
 		return;
 	}
@@ -534,19 +514,18 @@ void PlayerTasks::updateTask(Player* player, const std::string& monsterName, boo
 			continue;
 		}
 
-		taskData.updateTask(player, monsterName);
+		taskData.updateTask(player, monsterName, halfEntry);
 		if (!taskData.isCompleted()) {
 			// Task is not finished yet
 			continue;
 		}
 
 		// Task is finished, yey!
-		break;
+		// Don't break the loop, as more tasks can have the same monster in the poll
 	}
 }
 
-bool PlayerTasks::isActive()
-{
+bool PlayerTasks::isActive() {
 	if (m_active) {
 		return false;
 	}
@@ -555,8 +534,7 @@ bool PlayerTasks::isActive()
 	return true;
 }
 
-uint16_t PlayerTasks::getCompletedTasks(const std::string& taskName) const
-{
+uint16_t PlayerTasks::getCompletedTasks(const std::string& taskName) const {
 	auto itCompletedTask = m_completedTasks.find(taskName);
 	if (itCompletedTask == m_completedTasks.end()) {
 		// This task has not been completed yet
@@ -566,8 +544,7 @@ uint16_t PlayerTasks::getCompletedTasks(const std::string& taskName) const
 	return itCompletedTask->second;
 }
 
-bool PlayerTasks::canTakeTask(Player* player, const std::string& taskName) const
-{
+bool PlayerTasks::canTakeTask(Player* player, const std::string& taskName) const {
 	if (m_activeTasks.size() >= PlayerTasksData::getInstance()->getMaximumTaskAtOnce(player)) {
 		return false;
 	}
@@ -586,8 +563,7 @@ bool PlayerTasks::canTakeTask(Player* player, const std::string& taskName) const
 	return getCompletedTasks(taskName) < task->maxRepeatQuantity;
 }
 
-bool PlayerTasks::hasActiveTask(const std::string& name) const
-{
+bool PlayerTasks::hasActiveTask(const std::string& name) const {
 	for (auto& [taskName, taskData] : m_activeTasks) {
 		if (name == taskName) {
 			return true;
@@ -597,8 +573,7 @@ bool PlayerTasks::hasActiveTask(const std::string& name) const
 	return false;
 }
 
-TaskData* PlayerTasks::getTask(const std::string& name)
-{
+TaskData* PlayerTasks::getTask(const std::string& name) {
 	for (auto& [taskName, taskData] : m_activeTasks) {
 		if (name == taskName) {
 			return &taskData;
@@ -608,30 +583,6 @@ TaskData* PlayerTasks::getTask(const std::string& name)
 	return nullptr;
 }
 
-const TasksList PlayerTasks::getTasks(const Player* player) const
-{
-	TasksList tasks = m_activeTasks;
-	for (auto& [taskName, taskData] : PlayerTasksData::getInstance()->getTasks()) {
-		if (taskData.bonusStorageId == 0) {
-			continue;
-		}
-
-		if (const_cast<Player*>(player)->canUpdateTask(taskData.bonusStorageId)) {
-			tasks.push_back({ taskName, taskData });
-		}
-	}
-
-	return tasks;
-}
-
-std::unordered_map<std::string, double> PlayerTasks::getAttributes() const
-{
-	std::unordered_map<std::string, double> attributes;
-	for (auto& [taskName, taskData] : PlayerTasksData::getInstance()->getTasks()) {
-		for (auto& [name, value] : taskData.attributes) {
-			attributes[name] += value;
-		}
-	}
-
-	return attributes;
+const TasksList PlayerTasks::getTasks(const Player* player) const {
+	return m_activeTasks;
 }

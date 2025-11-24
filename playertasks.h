@@ -1,20 +1,16 @@
 #pragma once
 #include "enums.h"
 
-//	[1] = {
-//		className = "TROLLS",
-//		monsters = { "Troll", "Island Troll", "Swamp Troll", "Frost Troll" },
-//		bossName = "Big Boss Trolliver",
-//		experience = 6000,
-//		count = 200,
-//		storageId = 5001,
-//		classOutfit = { type = 15 },
-//		rewards = { 2148, 4, 2152, 4, 2160, 1 }
-//	},
-
 static constexpr auto MAXIMUM_TASKS_AT_ONCE = 3;
 
-enum ReturnTaskMessages {
+using TaskRewards = std::vector<std::tuple<uint16_t, uint16_t, uint16_t>>;
+
+enum TaskType_t {
+	TASKTYPE_MULTITASK,
+	TASKTYPE_SINGLETASK
+};
+
+enum ReturnTaskMessages_t {
 	RET_TASK_NO_ERROR,
 	RET_TASK_ALREADY_TAKEN,
 	RET_TASK_IS_NOT_ACTIVE,
@@ -25,16 +21,22 @@ enum ReturnTaskMessages {
 
 struct TaskProgress {
 	std::vector<std::pair<std::string, Outfit_t>> names;
-	uint32_t count = 0;
-	uint32_t kills = 0;
+	TaskRewards rewards;
+	double count = 0.;
+	double kills = 0.;
+	uint8_t id = 0;
+	uint64_t experience = 0;
 
-	bool canUse(const std::string& monsterName) const {
+	bool canUse(const std::string& monsterName, uint8_t taskId) const {
+		if (taskId != 0 && taskId != id) {
+			return false;
+		}
+
 		for (auto& [name, outfit] : names) {
 			if (monsterName == name) {
 				return true;
 			}
 		}
-
 		return false;
 	}
 };
@@ -42,7 +44,7 @@ struct TaskProgress {
 struct TaskData
 {
 	TaskData() {}
-	TaskData(const TaskData* data, uint32_t kills, uint64_t cooldown) {
+	TaskData(const TaskData* data, uint8_t taskId, double kills, uint64_t cooldown) {
 		this->className = data->className;
 		this->bossName = data->bossName;
 		this->experience = data->experience;
@@ -52,12 +54,14 @@ struct TaskData
 		this->rewards = data->rewards;
 		this->cooldown = data->cooldown;
 		this->maxRepeatQuantity = data->maxRepeatQuantity;
+		this->type = data->type;
 		this->currentCooldown = cooldown;
+		this->taskId = taskId;
 		for (auto& taskProgress : this->monsters) {
 			taskProgress.kills = kills;
 		}
 	}
-	TaskData(const TaskData* data, const std::string& name, uint32_t kills, uint64_t cooldown) {
+	TaskData(const TaskData* data, uint8_t taskId, const std::string& name, double kills, uint64_t cooldown) {
 		this->className = data->className;
 		this->bossName = data->bossName;
 		this->experience = data->experience;
@@ -67,9 +71,11 @@ struct TaskData
 		this->rewards = data->rewards;
 		this->cooldown = data->cooldown;
 		this->maxRepeatQuantity = data->maxRepeatQuantity;
+		this->type = data->type;
 		this->currentCooldown = cooldown;
+		this->taskId = taskId;
 		for (auto& taskProgress : this->monsters) {
-			if (taskProgress.canUse(name)) {
+			if (taskProgress.canUse(name, taskId)) {
 				taskProgress.kills = kills;
 				break;
 			}
@@ -78,22 +84,21 @@ struct TaskData
 
 	uint32_t getTaskKills(const std::string& name) const {
 		for (auto& taskProgress : this->monsters) {
-			if (taskProgress.canUse(name)) {
+			if (taskProgress.canUse(name, taskId)) {
 				return taskProgress.kills;
 			}
 		}
 		return 0;
 	}
 
-	bool isBonusTask(const Player* player) const;
-	void updateTask(const Player* player, const std::string& name);
-	void updateTask(const std::string& name, uint32_t kills) {
+	void updateTask(const Player* player, const std::string& name, bool halfEntry);
+	void updateTask(const std::string& name, double kills) {
 		for (auto& taskProgress : this->monsters) {
 			if (taskProgress.kills >= taskProgress.count) {
 				continue;
 			}
 
-			if (taskProgress.canUse(name)) {
+			if (taskProgress.canUse(name, taskId)) {
 				taskProgress.kills = kills;
 				break;
 			}
@@ -102,8 +107,10 @@ struct TaskData
 
 	bool isCompleted() const {
 		for (auto& taskProgress : this->monsters) {
-			if (taskProgress.kills < taskProgress.count) {
-				return false;
+			if (taskId == 0 || taskProgress.id == taskId) {
+				if (taskProgress.kills < taskProgress.count) {
+					return false;
+				}
 			}
 		}
 		return true;
@@ -111,21 +118,31 @@ struct TaskData
 
 	bool canUse(const std::string& name) const {
 		for (auto& taskProgress : this->monsters) {
-			if (taskProgress.canUse(name)) {
+			if (taskProgress.canUse(name, taskId)) {
 				return true;
 			}
 		}
 		return false;
 	}
 
-	std::string className, bossName;
+	std::string className;
+	std::string bossName;
+
 	std::vector<TaskProgress> monsters;
-	std::vector<std::tuple<uint16_t, uint16_t, uint16_t>> rewards;
-	std::vector<std::pair<std::string, double>> attributes;
-	uint16_t maxRepeatQuantity = 0, repeatQuantity = 0;
-	uint32_t storageId = 0, bonusStorageId = 0;
-	uint64_t experience = 0, cooldown = 0, currentCooldown = 0;
+	TaskRewards rewards;
+
+	uint8_t taskId = 0;
+
+	uint16_t maxRepeatQuantity = 0;
+
+	uint32_t storageId = 0;
+
+	uint64_t experience = 0;
+	uint64_t cooldown = 0;
+	uint64_t currentCooldown = 0;
+
 	Outfit_t classOutfit;
+	TaskType_t type = TASKTYPE_MULTITASK;
 };
 
 typedef std::vector<std::pair<std::string, TaskData>> TasksList;
@@ -142,7 +159,7 @@ class PlayerTasksData
 		bool load();
 		bool reload();
 
-		const char* getReturnMessage(ReturnTaskMessages ret) const;
+		const char* getReturnMessage(ReturnTaskMessages_t ret) const;
 
 		uint16_t getMaximumTaskAtOnce(Player* player);
 
@@ -170,13 +187,13 @@ class PlayerTasks
 		virtual ~PlayerTasks() {}
 
 		void disable() { m_active = false; }
-		void updateTask(Player* player, const std::string& monsterName, bool lastHit);
-		void addTask(const TaskData* data, const std::string& monsterName, uint32_t kills, uint64_t cooldown);
-		void addTask(const std::string& taskName, const std::string& monsterName, uint32_t kills, uint64_t cooldown);
+		void updateTask(Player* player, const std::string& monsterName, bool lastHit, bool halfEntry);
+		void addTask(const TaskData* data, const std::string& monsterName, uint8_t taskId, double kills, uint64_t cooldown);
+		void addTask(const std::string& taskName, const std::string& monsterName, uint8_t taskId, double kills, uint64_t cooldown);
 		void addCompletedTask(const std::string& taskName, uint16_t count);
 		void removeTask(const std::string& taskName);
 
-		ReturnTaskMessages manageTask(Player* player, uint8_t id, const std::string& taskName);
+		ReturnTaskMessages_t manageTask(Player* player, uint8_t id, const std::string& taskName, uint8_t taskId);
 
 		uint32_t getTaskKills(const std::string& taskName, const std::string& monsterName);
 
@@ -186,8 +203,6 @@ class PlayerTasks
 		bool hasActiveTask(const std::string& taskName) const;
 		bool isActive();
 
-		std::unordered_map<std::string, double> getAttributes() const;
-
 		TaskData* getTask(const std::string& name);
 		const TasksList getTasks(const Player* player) const;
 		const CompletedTasks& getCompletedTasks() const { return m_completedTasks; }
@@ -195,9 +210,9 @@ class PlayerTasks
 	private:
 		uint16_t getCompletedTasks(const std::string& taskName) const;
 
-		ReturnTaskMessages completeTask(Player* player, const std::string& taskName);
-		ReturnTaskMessages selectTask(Player* player, const std::string& taskName);
-		ReturnTaskMessages cancelTask(const std::string& taskName);
+		ReturnTaskMessages_t completeTask(Player* player, const std::string& taskName);
+		ReturnTaskMessages_t selectTask(Player* player, const std::string& taskName, uint8_t taskId);
+		ReturnTaskMessages_t cancelTask(const std::string& taskName);
 
 		TasksList m_activeTasks;
 		CompletedTasks m_completedTasks;

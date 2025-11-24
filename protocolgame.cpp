@@ -2106,94 +2106,115 @@ void ProtocolGame::parseExtendedOpcode(NetworkMessage& msg)
 	addGameTask(&Game::parsePlayerExtendedOpcode, player->getID(), opcode, buffer);
 }
 
-void ProtocolGame::sendTasks()
-{
+void ProtocolGame::sendTasks() {
 	NetworkMessage msg;
 	msg.addByte(0xE9);
 	msg.add<uint16_t>(PlayerTasksData::getInstance()->getMaximumTaskAtOnce(player));
 
-	const bool updateTasks = player->isActive();
-	const auto& completedTasks = player->getCompletedTasks();
 	const auto currentTime = OTSYS_TIME();
-	const auto tasks = updateTasks ? PlayerTasksData::getInstance()->getTasks() : player->getTasks();
+	const auto& tasks = PlayerTasksData::getInstance()->getTasks();
 	msg.addByte(tasks.size());
-
 	for (auto& [taskName, taskData] : tasks) {
-		auto itCompletedTask = completedTasks.find(taskData.className);
-		if (itCompletedTask == completedTasks.end() || itCompletedTask->second < taskData.maxRepeatQuantity) {
-			msg.addByte(0x01);
-		}
-		else {
-			msg.addByte(0x00);
-		}
-
 		msg.addString(taskData.className);
-		msg.addByte(taskData.isBonusTask(player) ? 0x01 : 0x00);
-		msg.addByte(player->hasActiveTask(taskName));
+		msg.addString(taskData.bossName);
+		msg.add<uint16_t>(taskData.maxRepeatQuantity);
+		msg.add<uint64_t>(taskData.experience);
+		msg.addByte(taskData.type);
+		AddOutfit(msg, taskData.classOutfit);
 
-		uint64_t cooldown = player->getTaskCooldown(taskData.className);
-		if (cooldown == 0) {
-			msg.add<uint32_t>(cooldown);
-		}
-		else {
-			msg.add<uint32_t>((cooldown - currentTime) / 1000);
-		}
-
-		msg.add<uint16_t>(taskData.monsters.size());
-		for (auto& taskProgress : taskData.monsters) {
-			msg.add<uint32_t>(updateTasks ? player->getTaskKills(taskData.className, taskProgress.names.front().first) : taskProgress.kills);
-			if (updateTasks) {
-				msg.add<uint32_t>(taskProgress.count);
+		TaskData* data = player->m_tasks->getTask(taskData.className);
+		if (data) {
+			msg.addByte(0x01);
+			msg.addByte(data->taskId);
+			if (data->currentCooldown == 0) {
+				msg.add<uint32_t>(0);
+			} else {
+				msg.add<uint32_t>((data->currentCooldown - currentTime) / 1000);
 			}
 
-			msg.add<uint16_t>(taskProgress.names.size());
-			for (auto& [monsterName, monsterOutfit] : taskProgress.names) {
-				msg.addString(monsterName);
-				if (updateTasks) {
+			msg.add<uint16_t>(data->monsters.size());
+			for (auto& taskProgress : data->monsters) {
+				msg.add<uint32_t>(taskProgress.count);
+				msg.add<uint32_t>(taskProgress.kills * 10);
+				msg.add<uint64_t>(taskProgress.experience);
+
+				msg.add<uint16_t>(taskProgress.rewards.size());
+				for (auto& [itemId, clientId, itemCount] : taskProgress.rewards) {
+					msg.add<uint16_t>(clientId);
+					msg.add<uint16_t>(itemCount);
+				}
+
+				msg.add<uint16_t>(taskProgress.names.size());
+				for (auto& [monsterName, monsterOutfit] : taskProgress.names) {
+					msg.addString(monsterName);
+					AddOutfit(msg, monsterOutfit);
+				}
+			}
+		} else {
+			msg.addByte(0x00);
+			msg.addByte(0x00);
+			msg.add<uint32_t>(0);
+
+			msg.add<uint16_t>(taskData.monsters.size());
+			for (auto& taskProgress : taskData.monsters) {
+				msg.add<uint32_t>(taskProgress.count);
+				msg.add<uint32_t>(taskProgress.kills * 10);
+				msg.add<uint64_t>(taskProgress.experience);
+
+				msg.add<uint16_t>(taskProgress.rewards.size());
+				for (auto& [itemId, clientId, itemCount] : taskProgress.rewards) {
+					msg.add<uint16_t>(clientId);
+					msg.add<uint16_t>(itemCount);
+				}
+
+				msg.add<uint16_t>(taskProgress.names.size());
+				for (auto& [monsterName, monsterOutfit] : taskProgress.names) {
+					msg.addString(monsterName);
 					AddOutfit(msg, monsterOutfit);
 				}
 			}
 		}
 
-		if (updateTasks) {
-			msg.addString(taskData.bossName);
-			msg.add<uint64_t>(taskData.experience);
-			AddOutfit(msg, taskData.classOutfit);
-			msg.add<uint16_t>(taskData.maxRepeatQuantity);
-
-			msg.add<uint16_t>(taskData.rewards.size());
-			for (auto& [itemId, clientId, itemCount] : taskData.rewards) {
-				msg.add<uint16_t>(clientId);
-				msg.add<uint16_t>(itemCount);
-			}
-
-			msg.add<uint16_t>(taskData.attributes.size());
-			for (auto& [name, value] : taskData.attributes) {
-				msg.addString(name);
-				msg.add<uint32_t>(value * 100);
-			}
+		msg.add<uint16_t>(taskData.rewards.size());
+		for (auto& [itemId, clientId, itemCount] : taskData.rewards) {
+			msg.add<uint16_t>(clientId);
+			msg.add<uint16_t>(itemCount);
 		}
+	}
+
+	const auto& completedTasks = player->getCompletedTasks();
+	msg.addByte(completedTasks.size());
+	for (auto& [taskName, taskQuantity] : completedTasks) {
+		msg.addString(taskName);
+		msg.add<uint16_t>(taskQuantity);
 	}
 
 	writeToOutputBuffer(msg);
 }
 
-void ProtocolGame::parseTasks(NetworkMessage& msg)
-{
+void ProtocolGame::parseTasks(NetworkMessage& msg) {
 	const uint8_t id = msg.getByte();
 	switch (id) {
-		case 0: {
+		case 0:
+		{
 			// Open task window
-			addGameTask(&Game::playerManageTasks, player->getID(), id, "");
+			addGameTask(&Game::playerManageTasks, player->getID(), id, "", 0);
 			break;
 		}
-		case 1:		// Claim rewards
-		case 2:		// Select task
-		case 3: {	// Cancel task
-			addGameTask(&Game::playerManageTasks, player->getID(), id, msg.getString());
+		case 1: // Claim rewards
+		case 3: // Cancel task
+		{
+			addGameTask(&Game::playerManageTasks, player->getID(), id, msg.getString(), 0);
+			break;
+		}
+		case 2:
+		{
+			// Select task
+			const auto name = msg.getString();
+			addGameTask(&Game::playerManageTasks, player->getID(), id, name, msg.getByte());
 			break;
 		}
 		default:
 			break;
 	}
-} 
+}

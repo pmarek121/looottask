@@ -4527,7 +4527,7 @@ bool Game::playerUpdateAutoLoot(uint32_t playerId, uint16_t clientId, const std:
 	return true;
 }
 
-void Game::playerManageTasks(uint32_t playerId, uint8_t id, const std::string& taskName)
+void Game::playerManageTasks(uint32_t playerId, uint8_t id, const std::string& taskName, uint8_t taskId)
 {
 	Player* player = getPlayerByID(playerId);
 	if (!player) {
@@ -4543,7 +4543,7 @@ void Game::playerManageTasks(uint32_t playerId, uint8_t id, const std::string& t
 		case 1:		// Claim rewards
 		case 2:		// Select task
 		case 3: {	// Cancel task
-			ReturnTaskMessages ret = player->manageTask(id, taskName);
+			ReturnTaskMessages_t ret = player->manageTask(id, taskName, taskId);
 			if (ret != RET_TASK_NO_ERROR) {
 				player->sendCancelMessage(PlayerTasksData::getInstance()->getReturnMessage(ret));
 			}
